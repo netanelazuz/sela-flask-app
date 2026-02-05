@@ -1,0 +1,107 @@
+name: PR Build, Test, Push (GHCR)
+
+on:
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/netanelazuz/flask-app-ci-cd
+  IMAGE_TAG: ${{ github.sha }}
+  ARTIFACT_NAME: docker-image-${{ github.sha }}
+
+jobs:
+  build:
+    name: Build Docker image + upload artifact
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: |
+          docker build -t "${IMAGE_NAME}:${IMAGE_TAG}" .
+
+      - name: Save image to tar
+        run: |
+          mkdir -p dist
+          docker save "${IMAGE_NAME}:${IMAGE_TAG}" -o "dist/image.tar"
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: dist/image.tar
+          retention-days: 1
+
+  test:
+    name: Download artifact + test image
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: dist
+
+      - name: Load image
+        run: |
+          docker load -i dist/image.tar
+          docker image ls
+          
+      - name: Run container
+        run: |
+          docker run -d --rm --name flask-app -p 5000:5000 "${IMAGE_NAME}:${IMAGE_TAG}"
+          # wait for app
+          for i in {1..20}; do
+            if curl -fsS "http://localhost:5000/" >/dev/null; then
+              echo "App is up"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Smoke tests
+        run: |
+          ROOT_RESPONSE=$(curl -fsS http://localhost:5000/)
+          echo "$ROOT_RESPONSE" | grep '"service":"flask-actions-demo"'
+          echo "$ROOT_RESPONSE" | grep '"message":"Hello from Flask"'
+
+          HEALTH_RESPONSE=$(curl -fsS http://localhost:5000/health)
+          echo "$HEALTH_RESPONSE" | grep '"status":"ok"'
+
+
+      - name: Stop container
+        if: always()
+        run: |
+          docker stop flask-app || true
+
+  push:
+    name: Push to GHCR after tests
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: dist
+
+      - name: Load image
+        run: |
+          docker load -i dist/image.tar
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push image
+        run: |
+          docker push "${IMAGE_NAME}:${IMAGE_TAG}"
