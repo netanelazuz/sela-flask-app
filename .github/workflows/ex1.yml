@@ -1,0 +1,19 @@
+name: ex1 workflow
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  commands:
+    runs-on: ubuntu-latest
+  
+    steps:
+      - name: echo name
+        run: echo "hi netanel"
+
+      - name: echo the pusher name
+        run: echo ${github.actor}
+    
+    
