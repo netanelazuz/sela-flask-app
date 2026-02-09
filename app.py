@@ -12,6 +12,15 @@ def root():
         "port": int(os.environ.get("PORT", "8080"))
     })
 
+app.get("/ai")
+def ai():
+    # A simple endpoint so students can see the container is alive.
+    return jsonify({
+        "service": "ai message",
+        "message": "Hello from AI endpoint",
+        "port": int(os.environ.get("PORT", "8080"))
+    })
+
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"})
